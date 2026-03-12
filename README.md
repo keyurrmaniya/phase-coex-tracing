@@ -1,4 +1,4 @@
-# SGCMC Coexistence Tracing
+# Phase Coexistence Tracing
 
 This package provides a workflow for tracing solid-liquid phase coexistence lines in alloy systems using Semi-Grand Canonical Monte Carlo (SGCMC) and free energy anchoring from `calphy`.
 
@@ -17,8 +17,8 @@ You can install this package in your preferred conda environment:
 
 ```bash
 # Clone the repository (once uploaded to GitHub)
-git clone https://github.com/yourusername/sgcmc_coexistence.git
-cd sgcmc_coexistence
+git clone https://github.com/yourusername/phase-coex-tracing.git
+cd phase-coex-tracing
 
 # Install in editable mode
 pip install -e .
@@ -26,7 +26,7 @@ pip install -e .
 
 Alternatively, install directly from GitHub:
 ```bash
-pip install git+https://github.com/yourusername/sgcmc_coexistence.git
+pip install git+https://github.com/yourusername/phase-coex-tracing.git
 ```
 
 ## Usage
