@@ -9,6 +9,9 @@ Edit the config below and run:
 Output → coexistence_output/coexistence_line.csv
 """
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from sgcmc_coexistence.workflow import trace_coexistence
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +59,9 @@ config = {
     # Averaging & interpolation
     "n_last":         13000,   # rows used from average_k.dat ← user-configurable
     "n_grid":          1000,   # interpolation grid for phi   ← user-configurable
+
+    # Coexistence prediction
+    "prediction_method": "clausius-clapeyron", # "clausius-clapeyron" or "tau"
 
     # Calphy
     "calphy_exec":   "calphy",

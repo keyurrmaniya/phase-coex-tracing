@@ -156,3 +156,36 @@ def clausius_clapeyron_step(S_solid, x_solid, S_liquid, x_liquid, dT):
             "x_solid ≈ x_liquid; Clausius-Clapeyron is ill-defined."
         )
     return -(S_solid - S_liquid) / delta_x * dT
+
+
+def tau_based_prediction(U_solid, x_solid, U_liquid, x_liquid, d_tau):
+    """Compute d_delta_mu using the tau-based prediction equation.
+
+    Formula::
+
+        d_delta_mu = ((U_solid - U_liquid) * d_tau) / (2 * (x_solid - x_liquid))
+
+    Parameters
+    ----------
+    U_solid : float
+        Potential energy per atom of solid (eV/atom).
+    x_solid : float
+        Ag mole fraction of solid.
+    U_liquid : float
+        Potential energy per atom of liquid (eV/atom).
+    x_liquid : float
+        Ag mole fraction of liquid.
+    d_tau : float
+        Change in tau (Ti/T_new - Ti/T_old).
+
+    Returns
+    -------
+    float
+        Change in delta_mu (eV).
+    """
+    delta_x = x_solid - x_liquid
+    if abs(delta_x) < 1e-12:
+        raise ZeroDivisionError(
+            "x_solid ≈ x_liquid; tau-based prediction is ill-defined."
+        )
+    return ((U_solid - U_liquid) * d_tau) / (2 * delta_x)

@@ -43,6 +43,7 @@ from sgcmc_coexistence.coexistence import (
     find_coexistence,
     compute_entropy,
     clausius_clapeyron_step,
+    tau_based_prediction,
 )
 from sgcmc_coexistence.calphy_runner import run_pure_phase_fe
 from sgcmc_coexistence.lammps_runner import run_sgcmc_scan, run_sgcmc_single
@@ -103,6 +104,9 @@ DEFAULT_CONFIG = {
     "calphy_n_switch":      50000,
     "calphy_n_iterations":      1,
     # calphy runs after SGCMC finishes; it reuses the same `cores` (no separate setting needed)
+
+    # ── Coexistence prediction ──────────────────────────────────────────
+    "prediction_method":    "clausius-clapeyron",  # "clausius-clapeyron" or "tau"
 
     # ── Output ───────────────────────────────────────────────────────────
     "output_dir": "coexistence_output",
@@ -389,12 +393,29 @@ def trace_coexistence(config=None):
             log.info("S_solid=%.6f  S_liquid=%.6f  eV/(atom·K)",
                      S_solid, S_liquid)
 
-            # ── Clausius-Clapeyron ────────────────────────────────────
-            try:
-                d_mu = clausius_clapeyron_step(
-                    S_solid, x_s_coex, S_liquid, x_l_coex, dT)
-            except ZeroDivisionError as exc:
-                log.error("Clausius-Clapeyron failed: %s — stopping.", exc)
+            # ── Prediction ────────────────────────────────────────────
+            pred_method = config.get("prediction_method", "clausius-clapeyron")
+            
+            if pred_method == "clausius-clapeyron":
+                try:
+                    d_mu = clausius_clapeyron_step(
+                        S_solid, x_s_coex, S_liquid, x_l_coex, dT)
+                except ZeroDivisionError as exc:
+                    log.error("Clausius-Clapeyron failed: %s — stopping.", exc)
+                    break
+            elif pred_method == "tau":
+                T_start = config["T_start"]
+                tau_old = T_start / T_current
+                tau_new = T_start / (T_current + dT)
+                d_tau = tau_new - tau_old
+                try:
+                    d_mu = tau_based_prediction(
+                        U_solid, x_s_coex, U_liquid, x_l_coex, d_tau)
+                except ZeroDivisionError as exc:
+                    log.error("Tau-based prediction failed: %s — stopping.", exc)
+                    break
+            else:
+                log.error("Unknown prediction_method: %s", pred_method)
                 break
 
             delta_mu_new = mu_coex + d_mu

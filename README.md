@@ -1,41 +1,64 @@
-# Phase Coexistence Tracing
+# Phase Coexistence Tracing Methodology
 
-This package provides a workflow for tracing solid-liquid phase coexistence lines in alloy systems using Semi-Grand Canonical Monte Carlo (SGCMC) and free energy anchoring from `calphy`.
+This document details the thermodynamic framework and workflow used to determine the solid-liquid coexistence line in the Cu-Ag alloy system.
 
-## Features
-- **Thermodynamic Integration**: Calculates semi-grand free energy ($\Phi$) from SGCMC scans.
-- **Coexistence Finding**: Locates phase crossing points on a fine interpolated grid.
-- **Clausius-Clapeyron Tracing**: Automatically steps in temperature to map the phase envelope.
-- **Direction-Agnostic**: Supports both forward (heating) and reverse (cooling) tracing.
+## 1. Thermodynamic Ensemble
+The simulations are performed in the **Semi-Grand Canonical Ensemble** (constant $T, P, N, \Delta\mu$), where:
+- $T$: Temperature
+- $P$: Pressure (usually 0 bar)
+- $N$: Total number of atoms
+- $\delta\mu$: Chemical potential difference between species ($\mu_{Ag} - \mu_{Cu}$)
 
-## Methodology
-The detailed thermodynamic derivations are available in [methodology.pdf](./methodology.pdf).
+The characteristic state function for this ensemble is the **Semi-Grand Free Energy** ($\Phi$), defined per atom as:
+$$\Phi = U - TS - \delta\mu x$$
+where $U$ is the potential energy per atom, $S$ is the entropy per atom, and $x$ is the mole fraction of the solute species (Ag).
 
-## Installation
+The fundamental differential relation for $\Phi$ is:
+$$d\Phi = -S dT + v dP - x d\delta\mu$$
+At constant pressure ($v dP = 0$):
+$$d\Phi = -S dT - x d\delta\mu$$
 
-You can install this package in your preferred conda environment:
+## 2. Determining Coexistence at $T_{start}$
+Finding the initial coexistence point requires calculating the full $\Phi(\delta\mu)$ curve for both phases at a fixed starting temperature.
 
-```bash
-# Clone the repository (once uploaded to GitHub)
-git clone https://github.com/yourusername/phase-coex-tracing.git
-cd phase-coex-tracing
+### 2.1 Pure-Phase Anchoring
+We calculate the free energy of the pure phases ($\Phi_0$) at a reference chemical potential $\delta\mu_0$ (usually corresponding to pure Cu) using the `calphy` library, which employs thermodynamic integration from a reference state (Einstein crystal for solid, Ideal Gas for liquid).
 
-# Install in editable mode
-pip install -e .
-```
+### 2.2 Thermodynamic Integration
+To obtain $\Phi$ at any $\delta\mu$, we integrate the composition $x$ from the SGCMC simulations:
+$$\Phi(T, \delta\mu) = \Phi(T, \delta\mu_0) - \int_{\delta\mu_0}^{\delta\mu} x(\delta\mu') d\delta\mu'$$
+The integral is performed numerically using the trapezoidal rule on a fine grid (1000 points) interpolated from the SGCMC simulation data.
 
-Alternatively, install directly from GitHub:
-```bash
-pip install git+https://github.com/yourusername/phase-coex-tracing.git
-```
+### 2.3 Coexistence Condition
+Phase coexistence occurs when the semi-grand free energies of the solid ($s$) and liquid ($l$) phases are equal:
+$$\Phi_s(T, \delta\mu_{coex}) = \Phi_l(T, \delta\mu_{coex})$$
+We solve for $\delta\mu_{coex}$ by finding the intersection of the two $\Phi$ curves.
 
-## Usage
+## 3. Tracing the Coexistence Line
+Once the first point is found, we step in temperature using the **Clausius-Clapeyron equation** for the semi-grand canonical ensemble.
 
-1. Prepare your LAMMPS data files for solid and liquid phases.
-2. Edit the configuration in `examples/example_run.py`.
-3. Run the workflow:
-   ```bash
-   python examples/example_run.py
-   ```
+### 3.1 Entropy Calculation
+The entropy per atom at the coexistence point is calculated using the relation:
+$$S = \frac{U - \delta\mu_{coex} x - \Phi}{T}$$
+where all quantities on the right are measured or calculated at the current temperature $T$.
 
-The results will be saved to a CSV file (e.g., `coexistence_line.csv`).
+### 3.2 Clausius-Clapeyron Prediction
+Along the coexistence line, $d\Phi_s = d\Phi_l$. Substituting the differential relation:
+$$-S_s dT - x_s d\delta\mu = -S_l dT - x_l d\delta\mu$$
+Rearranging gives the slope of the coexistence line:
+$$\frac{d\delta\mu_{coex}}{dT} = - \frac{S_s - S_l}{x_s - x_l}$$
+For a small temperature step $\Delta T$, the new coexistence chemical potential is predicted as:
+$$\delta\mu_{coex}(T + \Delta T) \approx \delta\mu_{coex}(T) + \left( \frac{d\delta\mu_{coex}}{dT} \right) \Delta T$$
+
+### 3.3 Alternative $\tau$-based Prediction
+An alternative prediction method uses the reciprocal temperature $\tau = T_{start} / T$. The change in coexistence chemical potential is predicted as:
+$$d\delta\mu = \frac{(U_s - U_l) d\tau}{2 (x_s - x_l)}$$
+where $d\tau = \tau_{new} - \tau_{old}$. The user can select the desired prediction method in the configuration.
+
+## 4. Refinement Loop
+1. **Prediction**: Estimate $\delta\mu_{new}$ for $T + \Delta T$ using the Clausius-Clapeyron slope.
+2. **Measurement**: Perform a single-point SGCMC simulation at the new $(T, \delta\mu)$ to obtain updated $U$ and $x$.
+3. **Update**: Recalculate pure-phase $\Phi_0$ at the new $T$ using `calphy`.
+4. **Iterate**: Repeat the entropy calculation and slope prediction for the next step.
+
+This methodology allows for efficient tracing of the entire phase envelope starting from a single scan.
