@@ -76,22 +76,14 @@ def _define_composition_groups(lmp):
 
 
 def _run_one_mu(lmp, config, T, chem_pot, count, seed):
-    """Run equilibration + production for a single delta_mu.
+    """Run SGCMC simulation for a single delta_mu.
 
     Produces ``average_{count}.dat`` and ``traj_{count}.dat``.
     """
-    # ── Step 1: equilibrate at this mu (no output) ──────────────────
+    # ── production with statistics ──────────────────────────
     lmp.command(
         f"fix swap all atom/swap ${{nevery}} ${{nattempts}} {seed} {T} "
-        f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f} noforce yes"
-    )
-    lmp.command("run             ${nsw}")
-    lmp.command("unfix           swap")
-
-    # ── Step 2: production with statistics ──────────────────────────
-    lmp.command(
-        f"fix swap all atom/swap ${{nevery}} ${{nattempts}} {seed} {T} "
-        f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f} noforce yes"
+        f"semi-grand yes noforce yes types 1 2 mu 0.0 {chem_pot:.4f}"
     )
     
     save_traj = config.get("save_traj", False)
@@ -99,7 +91,7 @@ def _run_one_mu(lmp, config, T, chem_pot, count, seed):
         lmp.command(f"dump d1 all custom 5000 traj_{count}.dat id type mass x y z")
 
     lmp.command(
-        f'fix f2 all print 1 "$(pe) ${{countone}} ${{counttwo}}" '
+        f'fix f2 all print 1 "$(pe) $(v_countone) $(v_counttwo)" '
         f'screen no file average_{count}.dat'
     )
     lmp.command("run             ${nsw}")
