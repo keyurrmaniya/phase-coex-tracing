@@ -59,6 +59,7 @@ config = {
     # Averaging & interpolation
     "n_last":         13000,   # rows used from average_k.dat ← user-configurable
     "n_grid":          1000,   # interpolation grid for phi   ← user-configurable
+    "save_traj":       False,  # whether to save LAMMPS trajectory files
 
     # Coexistence prediction & Refinement
     "prediction_method": "clausius-clapeyron", # "clausius-clapeyron" or "tau"

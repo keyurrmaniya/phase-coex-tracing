@@ -82,6 +82,7 @@ def _run_one_mu(lmp, T, chem_pot, count, seed):
     """
     # ── Step 1: equilibrate at this mu (no output) ──────────────────
     lmp.command(
+        f"fix swap all atom/swap ${{nevery}} ${{nattempts}} {seed} {T} "
         f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f} noforce yes"
     )
     lmp.command("run             ${nsw}")
@@ -89,9 +90,14 @@ def _run_one_mu(lmp, T, chem_pot, count, seed):
 
     # ── Step 2: production with statistics ──────────────────────────
     lmp.command(
+        f"fix swap all atom/swap ${{nevery}} ${{nattempts}} {seed} {T} "
         f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f} noforce yes"
     )
-    lmp.command(f"dump d1 all custom 5000 traj_{count}.dat id type mass x y z")
+    
+    save_traj = config.get("save_traj", False)
+    if save_traj:
+        lmp.command(f"dump d1 all custom 5000 traj_{count}.dat id type mass x y z")
+
     lmp.command(
         f'fix f2 all print 1 "$(pe) ${{countone}} ${{counttwo}}" '
         f'screen no file average_{count}.dat'
@@ -99,7 +105,9 @@ def _run_one_mu(lmp, T, chem_pot, count, seed):
     lmp.command("run             ${nsw}")
     lmp.command("unfix           swap")
     lmp.command("unfix           f2")
-    lmp.command(f"undump          d1")
+    
+    if save_traj:
+        lmp.command(f"undump          d1")
 
 
 def run_sgcmc_scan(config, T, chem_pots, working_dir, cores=48):
