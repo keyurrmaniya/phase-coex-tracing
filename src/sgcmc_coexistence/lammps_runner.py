@@ -82,16 +82,14 @@ def _run_one_mu(lmp, T, chem_pot, count, seed):
     """
     # ── Step 1: equilibrate at this mu (no output) ──────────────────
     lmp.command(
-        f"fix swap all atom/swap ${{nevery}} ${{nattempts}} {seed} {T} "
-        f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f}"
+        f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f} noforce yes"
     )
     lmp.command("run             ${nsw}")
     lmp.command("unfix           swap")
 
     # ── Step 2: production with statistics ──────────────────────────
     lmp.command(
-        f"fix swap all atom/swap ${{nevery}} ${{nattempts}} {seed} {T} "
-        f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f}"
+        f"semi-grand yes types 1 2 mu 0.0 {chem_pot:.4f} noforce yes"
     )
     lmp.command(f"dump d1 all custom 5000 traj_{count}.dat id type mass x y z")
     lmp.command(
