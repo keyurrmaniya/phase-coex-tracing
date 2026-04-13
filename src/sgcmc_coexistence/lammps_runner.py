@@ -75,7 +75,7 @@ def _define_composition_groups(lmp):
     lmp.command("variable counttwo equal count(grouptwo)")
 
 
-def _run_one_mu(lmp, T, chem_pot, count, seed):
+def _run_one_mu(lmp, config, T, chem_pot, count, seed):
     """Run equilibration + production for a single delta_mu.
 
     Produces ``average_{count}.dat`` and ``traj_{count}.dat``.
@@ -151,7 +151,7 @@ def run_sgcmc_scan(config, T, chem_pots, working_dir, cores=48):
     _define_composition_groups(lmp)
 
     for count, mu in enumerate(chem_pots):
-        _run_one_mu(lmp, T, mu, count, seed)
+        _run_one_mu(lmp, config, T, mu, count, seed)
 
     lmp.command("unfix           f1")
     lmp.close()
@@ -194,7 +194,7 @@ def run_sgcmc_single(config, T, delta_mu, working_dir, cores=48):
     lmp = _build_lmp(config, working_dir, cores)
     _equilibrate(lmp, T, seed)
     _define_composition_groups(lmp)
-    _run_one_mu(lmp, T, delta_mu, count=0, seed=seed)
+    _run_one_mu(lmp, config, T, delta_mu, count=0, seed=seed)
     lmp.command("unfix           f1")
     lmp.close()
 
