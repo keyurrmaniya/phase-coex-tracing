@@ -102,9 +102,7 @@ def compute_entropy(U_per_atom, delta_mu, x, phi, T):
 
     Uses::
 
-        S = (U - (x - 0.5) * delta_mu - phi) / T
-
-    Note: This is consistent with phi = g - (2x - 1) * (delta_mu / 2).
+        S = (U - delta_mu * x - phi) / T
 
     Parameters
     ----------
