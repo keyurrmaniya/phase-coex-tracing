@@ -124,7 +124,7 @@ def compute_entropy(U_per_atom, delta_mu, x, phi, T):
     float
         Entropy per atom in eV/(atom·K).
     """
-    return (U_per_atom - (x - 0.5) * delta_mu - phi) / T
+    return (U_per_atom - delta_mu * x - phi) / T
 
 
 def clausius_clapeyron_step(S_solid, x_solid, S_liquid, x_liquid, dT):

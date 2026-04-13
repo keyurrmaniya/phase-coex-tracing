@@ -12,7 +12,7 @@ Edit the config dict at the top of ``example_run.py``, then run::
 Physics recap
 -------------
 phi(delta_mu) = phi_0 - ∫ (x - 0.5) * d_delta_mu   (on a 1000-pt interpolated grid)
-S             = (U - (x - 0.5) * delta_mu - phi) / T
+S             = (U - delta_mu * x - phi) / T
 d_delta_mu    = -(S_solid - S_liquid) / (x_solid - x_liquid) * dT
 
 Workflow loop
