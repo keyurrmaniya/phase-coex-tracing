@@ -60,8 +60,10 @@ config = {
     "n_last":         13000,   # rows used from average_k.dat ← user-configurable
     "n_grid":          1000,   # interpolation grid for phi   ← user-configurable
 
-    # Coexistence prediction
+    # Coexistence prediction & Refinement
     "prediction_method": "clausius-clapeyron", # "clausius-clapeyron" or "tau"
+    "n_local_points":    5,      # total points in local refinement scan
+    "local_spacing":     0.02,   # spacing between refinement points in eV
 
     # Calphy
     "calphy_exec":   "calphy",
