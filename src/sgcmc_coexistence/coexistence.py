@@ -102,18 +102,20 @@ def compute_entropy(U_per_atom, delta_mu, x, phi, T):
 
     Uses::
 
-        S = (U - delta_mu * x - phi) / T
+        S = (U - (x - 0.5) * delta_mu - phi) / T
+
+    Note: This is consistent with phi = g - (2x - 1) * (delta_mu / 2).
 
     Parameters
     ----------
     U_per_atom : float
         Mean potential energy per atom (eV/atom).
     delta_mu : float
-        Chemical potential difference at coexistence (eV).
+        Chemical potential difference (species 2 - species 1) in eV.
     x : float
         Mean Ag mole fraction at coexistence.
     phi : float
-        Semi-grand free energy at coexistence (eV/atom).
+        Semi-grand free energy (scaled definition) in eV/atom.
     T : float
         Temperature (K).
 
@@ -122,7 +124,7 @@ def compute_entropy(U_per_atom, delta_mu, x, phi, T):
     float
         Entropy per atom in eV/(atom·K).
     """
-    return (U_per_atom - delta_mu * x - phi) / T
+    return (U_per_atom - (x - 0.5) * delta_mu - phi) / T
 
 
 def clausius_clapeyron_step(S_solid, x_solid, S_liquid, x_liquid, dT):

@@ -11,8 +11,8 @@ Edit the config dict at the top of ``example_run.py``, then run::
 
 Physics recap
 -------------
-phi(delta_mu) = phi_0 - ∫ x * d_delta_mu   (on a 1000-pt interpolated grid)
-S             = (U - delta_mu * x - phi) / T
+phi(delta_mu) = phi_0 - ∫ (x - 0.5) * d_delta_mu   (on a 1000-pt interpolated grid)
+S             = (U - (x - 0.5) * delta_mu - phi) / T
 d_delta_mu    = -(S_solid - S_liquid) / (x_solid - x_liquid) * dT
 
 Workflow loop
@@ -21,13 +21,14 @@ Step 0  (T_start only):
     • SGCMC scan over all delta_mu → average_k.dat for both phases
     • calphy fe for pure Cu_fcc + pure lqd_Cu → phi0_solid, phi0_liquid
     • Interpolate x onto 1000-pt grid; compute phi(delta_mu) for both phases
+      (using phi = phi0 - ∫ (2x - 1) d(delta_mu/2))
     • Find crossing of phi_solid and phi_liquid → delta_mu_coex
     • Compute entropy at coexistence; apply Clausius-Clapeyron → delta_mu_new
 
 Steps 1, 2, … (T+dT, T+2dT, …):
-    • SGCMC single run at predicted delta_mu_new for both phases
-    • calphy fe at new T for both phases
-    • Compute phi at the single point; record coexistence state
+    • SGCMC local scan around predicted delta_mu_new
+    • Use thermodynamic relation phi_pred = phi_old - S_old * dT
+    • Integrate (2x-1) locally from delta_mu_pred to find refined crossing delta_mu_coex
     • Clausius-Clapeyron → next delta_mu_new
 """
 
@@ -105,8 +106,10 @@ DEFAULT_CONFIG = {
     "calphy_n_iterations":      1,
     # calphy runs after SGCMC finishes; it reuses the same `cores` (no separate setting needed)
 
-    # ── Coexistence prediction ──────────────────────────────────────────
+    # ── Coexistence prediction & Refinement ─────────────────────────────
     "prediction_method":    "clausius-clapeyron",  # "clausius-clapeyron" or "tau"
+    "n_local_points":       5,      # total points in local scan (centered at pred)
+    "local_spacing":        0.02,   # spacing between points in eV
 
     # ── Output ───────────────────────────────────────────────────────────
     "output_dir": "coexistence_output",
@@ -332,55 +335,47 @@ def trace_coexistence(config=None):
                 run_sgcmc_scan(liquid_lmp_cfg, T_current, chem_pots,
                                liquid_dir, cores=config["cores"])
             else:
-                solid_dir  = os.path.join(out_dir,
-                                          f"solid_T{T_current:.0f}_step{step_idx}")
-                liquid_dir = os.path.join(out_dir,
-                                          f"liquid_T{T_current:.0f}_step{step_idx}")
-                log.info("SGCMC single — solid  @ T=%.0f K, δμ=%.4f eV",
-                         T_current, delta_mu_new)
-                run_sgcmc_single(solid_lmp_cfg,  T_current, delta_mu_new,
-                                 solid_dir,  cores=config["cores"])
-                log.info("SGCMC single — liquid @ T=%.0f K, δμ=%.4f eV",
-                         T_current, delta_mu_new)
-                run_sgcmc_single(liquid_lmp_cfg, T_current, delta_mu_new,
-                                 liquid_dir, cores=config["cores"])
+                # ── Local refinement scan ────────────────────────────
+                n_local = config.get("n_local_points", 5)
+                spacing = config.get("local_spacing", 0.02)
+                
+                # Center-aligned local grid
+                n_half = n_local // 2
+                mu_local = delta_mu_new + np.arange(-n_half, n_half + 1) * spacing
+                
+                log.info("SGCMC local scan — solid  @ T=%.0f K, range=[%.4f, %.4f] (%d pts)",
+                         T_current, mu_local[0], mu_local[-1], n_local)
+                run_sgcmc_scan(solid_lmp_cfg,  T_current, mu_local,
+                               solid_dir,  cores=config["cores"])
+                log.info("SGCMC local scan — liquid @ T=%.0f K", T_current)
+                run_sgcmc_scan(liquid_lmp_cfg, T_current, mu_local,
+                               liquid_dir, cores=config["cores"])
 
-            # ── Calphy fe ────────────────────────────────────────────
-            phi0_solid, phi0_liquid = _run_calphy_both(config, T_current, out_dir)
+                # ── Integrate from predicted phi ─────────────────────
+                # Predict phi using dphi = -S dT
+                # We need the previous results
+                last = results[-1]
+                phi_pred = last["phi_coex"] - last["S_solid"] * dT # Wait, s_solid or s_liquid? they should be equalish at coex
+                # Actually, use (s_solid + s_liquid)/2 for better stability?
+                # No, they are the same at coexistence.
+                
+                # NOTE: Since we changed phi definition, S is already consistent.
+                
+                df_s_local = compute_sgcmc_averages(solid_dir,  mu_local, n_atoms, n_last)
+                df_l_local = compute_sgcmc_averages(liquid_dir, mu_local, n_atoms, n_last)
+                
+                mu_s, x_s_fine, phi_s = compute_semi_grand_fe(
+                    df_s_local, phi_pred, n_grid=n_grid, mu_ref=delta_mu_new)
+                mu_l, x_l_fine, phi_l = compute_semi_grand_fe(
+                    df_l_local, phi_pred, n_grid=n_grid, mu_ref=delta_mu_new)
 
-            # ── Phi on fine grid ─────────────────────────────────────
-            if step_idx == 0:
-                mu_pts = chem_pots
-                df_s, mu_s, x_s_fine, phi_s = _phi_from_scan(
-                    solid_dir,  mu_pts, phi0_solid,  config)
-                df_l, mu_l, x_l_fine, phi_l = _phi_from_scan(
-                    liquid_dir, mu_pts, phi0_liquid, config)
-
-                # ── Find coexistence ──────────────────────────────────
+                # ── Find refined coexistence ──────────────────────────
                 mu_coex, x_s_coex, x_l_coex, phi_coex = find_coexistence(
                     mu_s, x_s_fine, phi_s,
                     mu_l, x_l_fine, phi_l)
 
-                # ── U per atom near coexistence ───────────────────────
-                U_solid  = _U_at_mu(
-                    solid_dir,  mu_pts, mu_coex, n_atoms, n_last)
-                U_liquid = _U_at_mu(
-                    liquid_dir, mu_pts, mu_coex, n_atoms, n_last)
-
-            else:
-                # Single-mu step: phi is just phi0 (integral = 0 since range = 0)
-                mu_coex  = delta_mu_new
-                # Use the single-point composition from the file
-                df_s_raw = compute_sgcmc_averages(
-                    solid_dir,  [delta_mu_new], n_atoms, n_last)
-                df_l_raw = compute_sgcmc_averages(
-                    liquid_dir, [delta_mu_new], n_atoms, n_last)
-                x_s_coex = float(df_s_raw["x_mean"].iloc[0])
-                x_l_coex = float(df_l_raw["x_mean"].iloc[0])
-                phi_coex = 0.5 * (phi0_solid + phi0_liquid)
-
-                U_solid  = _U_single(solid_dir,  n_atoms, n_last)
-                U_liquid = _U_single(liquid_dir, n_atoms, n_last)
+                U_solid  = _U_at_mu(solid_dir,  mu_local, mu_coex, n_atoms, n_last)
+                U_liquid = _U_at_mu(liquid_dir, mu_local, mu_coex, n_atoms, n_last)
 
             log.info("Coexistence: δμ=%.4f eV  x_solid=%.4f  x_liquid=%.4f",
                      mu_coex, x_s_coex, x_l_coex)

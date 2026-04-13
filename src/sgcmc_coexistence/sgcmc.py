@@ -67,16 +67,19 @@ def compute_sgcmc_averages(average_dat_dir, chem_pots, n_atoms, n_last=13000):
     return pd.DataFrame(records)
 
 
-def compute_semi_grand_fe(df_sgcmc, phi0, n_grid=1000):
+def compute_semi_grand_fe(df_sgcmc, phi0, n_grid=1000, mu_ref=None):
     """Compute phi(delta_mu) on a fine interpolated grid.
+
+    Equation
+    --------
+    phi = phi_0 - ∫ (2x - 1) d(delta_mu_scaled)
+    where delta_mu_scaled = delta_mu / 2.
 
     Steps
     -----
     1. Fit a cubic spline to the raw (delta_mu, x) simulation points.
     2. Evaluate the spline on a uniform grid of ``n_grid`` points.
-    3. Integrate cumulatively with the trapezoidal rule::
-
-           phi(delta_mu) = phi_0 - ∫ x * d_delta_mu
+    3. Integrate cumulatively with the trapezoidal rule.
 
     Parameters
     ----------
@@ -84,10 +87,12 @@ def compute_semi_grand_fe(df_sgcmc, phi0, n_grid=1000):
         Output of :func:`compute_sgcmc_averages`, with columns
         ``delta_mu`` and ``x_mean``, sorted in ascending ``delta_mu``.
     phi0 : float
-        Free energy of the **pure phase** at the lowest ``delta_mu``
-        reference point (from calphy ``fe`` mode), in eV/atom.
+        Reference semi-grand free energy (eV/atom) at ``mu_ref``.
     n_grid : int
         Number of points in the interpolated grid.  Default: 1000.
+    mu_ref : float or None
+        The chemical potential value (Ag - Cu) where phi = phi0.
+        If None, the first point in df_sgcmc is used.
 
     Returns
     -------
@@ -102,21 +107,39 @@ def compute_semi_grand_fe(df_sgcmc, phi0, n_grid=1000):
     mu_raw = df["delta_mu"].values
     x_raw  = df["x_mean"].values
 
+    if mu_ref is None:
+        mu_ref = mu_raw[0]
+
     # ── Step 1: interpolate x onto fine grid ─────────────────────────
-    mu_fine = np.linspace(mu_raw[0], mu_raw[-1], n_grid)
+    # Ensure the grid includes mu_ref
+    mu_min = min(mu_raw[0], mu_ref)
+    mu_max = max(mu_raw[-1], mu_ref)
+    mu_fine = np.linspace(mu_min, mu_max, n_grid)
 
     spline = PchipInterpolator(mu_raw, x_raw)
     x_fine = spline(mu_fine)
-
-    # Clamp composition to [0, 1]
     x_fine = np.clip(x_fine, 0.0, 1.0)
 
     # ── Step 2: cumulative trapezoid integration ──────────────────────
+    # We integrate (2x - 1) over d(mu/2) = 0.5 * dmu
+    integrand = (2 * x_fine - 1) * 0.5
+    
+    # Cumulative integral from mu_ref
+    # Find the index closest to mu_ref
+    idx_ref = np.argmin(np.abs(mu_fine - mu_ref))
+    
     phi_fine = np.empty(n_grid)
-    phi_fine[0] = phi0
-
-    for i in range(1, n_grid):
-        integral = np.trapz(x_fine[:i+1], mu_fine[:i+1])
-        phi_fine[i] = phi0 - integral
+    phi_fine[idx_ref] = phi0
+    
+    # Integrate forward
+    for i in range(idx_ref + 1, n_grid):
+        # trapezoid area for the last segment
+        area = 0.5 * (integrand[i-1] + integrand[i]) * (mu_fine[i] - mu_fine[i-1])
+        phi_fine[i] = phi_fine[i-1] - area
+        
+    # Integrate backward
+    for i in range(idx_ref - 1, -1, -1):
+        area = 0.5 * (integrand[i] + integrand[i+1]) * (mu_fine[i+1] - mu_fine[i])
+        phi_fine[i] = phi_fine[i+1] + area
 
     return mu_fine, x_fine, phi_fine
