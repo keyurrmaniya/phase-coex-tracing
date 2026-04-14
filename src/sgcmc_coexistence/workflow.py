@@ -323,10 +323,11 @@ def trace_coexistence(config=None):
             log.info("=" * 60)
             log.info("T = %.1f K  (step %d)", T_current, step_idx)
 
+            solid_dir  = os.path.join(out_dir, f"solid_T{T_current:.0f}_scan")
+            liquid_dir = os.path.join(out_dir, f"liquid_T{T_current:.0f}_scan")
+
             # ── SGCMC runs ───────────────────────────────────────────
             if step_idx == 0:
-                solid_dir  = os.path.join(out_dir, f"solid_T{T_current:.0f}_scan")
-                liquid_dir = os.path.join(out_dir, f"liquid_T{T_current:.0f}_scan")
                 log.info("SGCMC scan — solid  @ T=%.0f K (%d points)",
                          T_current, len(chem_pots))
                 run_sgcmc_scan(solid_lmp_cfg,  T_current, chem_pots,
@@ -334,6 +335,22 @@ def trace_coexistence(config=None):
                 log.info("SGCMC scan — liquid @ T=%.0f K", T_current)
                 run_sgcmc_scan(liquid_lmp_cfg, T_current, chem_pots,
                                liquid_dir, cores=config["cores"])
+
+                # ── Reference free energies from Calphy ──────────────────
+                phi0_s, phi0_l = _run_calphy_both(config, T_current, out_dir)
+
+                # ── Integrate and find initial coexistence ───────────────
+                _, mu_s_scan, x_s_scan, phi_s_scan = _phi_from_scan(
+                    solid_dir, chem_pots, phi0_s, config)
+                _, mu_l_scan, x_l_scan, phi_l_scan = _phi_from_scan(
+                    liquid_dir, chem_pots, phi0_l, config)
+
+                mu_coex, x_s_coex, x_l_coex, phi_coex = find_coexistence(
+                    mu_s_scan, x_s_scan, phi_s_scan,
+                    mu_l_scan, x_l_scan, phi_l_scan)
+
+                U_solid  = _U_at_mu(solid_dir,  chem_pots, mu_coex, n_atoms, n_last)
+                U_liquid = _U_at_mu(liquid_dir, chem_pots, mu_coex, n_atoms, n_last)
             else:
                 # ── Local refinement scan ────────────────────────────
                 n_local = config.get("n_local_points", 5)
