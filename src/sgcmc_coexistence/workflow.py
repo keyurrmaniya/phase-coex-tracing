@@ -11,9 +11,10 @@ Edit the config dict at the top of ``example_run.py``, then run::
 
 Physics recap
 -------------
-phi(delta_mu) = phi_0 - ∫ (x - 0.5) * d_delta_mu   (on a 1000-pt interpolated grid)
+phi(delta_mu) = phi_0 - ∫ (2x - 1) d(delta_mu / 2)   (on a 1000-pt interpolated grid)
 S             = (U - (x - 0.5) * delta_mu - phi) / T
-d_delta_mu    = -(S_solid - S_liquid) / (x_solid - x_liquid) * dT
+d_delta_mu    = -(S_solid - S_liquid) / (x_solid - x_liquid) * dT   [Clausius-Clapeyron]
+d(delta_mu/2) = ((U_s - U_l) * d_tau) / (2*(x_s - x_l))            [tau-based; doubled before use]
 
 Workflow loop
 -------------
@@ -21,15 +22,16 @@ Step 0  (T_start only):
     • SGCMC scan over all delta_mu → average_k.dat for both phases
     • calphy fe for pure Cu_fcc + pure lqd_Cu → phi0_solid, phi0_liquid
     • Interpolate x onto 1000-pt grid; compute phi(delta_mu) for both phases
-      (using phi = phi0 - ∫ (2x - 1) d(delta_mu/2))
     • Find crossing of phi_solid and phi_liquid → delta_mu_coex
-    • Compute entropy at coexistence; apply Clausius-Clapeyron → delta_mu_new
+    • Compute entropy at coexistence; apply prediction → delta_mu_new
 
 Steps 1, 2, … (T+dT, T+2dT, …):
     • SGCMC local scan around predicted delta_mu_new
-    • Use thermodynamic relation phi_pred = phi_old - S_old * dT
-    • Integrate (2x-1) locally from delta_mu_pred to find refined crossing delta_mu_coex
-    • Clausius-Clapeyron → next delta_mu_new
+    • phi0 method (config option):
+      - "propagate": phi_pred = phi_old - S_old * dT  (no calphy)
+      - "calphy":    run calphy at every T step for fresh phi0
+    • Integrate (2x-1) locally from phi0 to find refined crossing delta_mu_coex
+    • Prediction → next delta_mu_new
 """
 
 import os
@@ -108,6 +110,7 @@ DEFAULT_CONFIG = {
 
     # ── Coexistence prediction & Refinement ─────────────────────────────
     "prediction_method":    "clausius-clapeyron",  # "clausius-clapeyron" or "tau"
+    "phi0_method":          "propagate",           # "propagate" (S-based) or "calphy" (every step)
     "n_local_points":       5,      # total points in local scan (centered at pred)
     "local_spacing":        0.02,   # spacing between points in eV
 
@@ -326,6 +329,8 @@ def trace_coexistence(config=None):
             solid_dir  = os.path.join(out_dir, f"solid_T{T_current:.0f}_scan")
             liquid_dir = os.path.join(out_dir, f"liquid_T{T_current:.0f}_scan")
 
+            phi0_method = config.get("phi0_method", "propagate")
+
             # ── SGCMC runs ───────────────────────────────────────────
             if step_idx == 0:
                 log.info("SGCMC scan — solid  @ T=%.0f K (%d points)",
@@ -338,6 +343,8 @@ def trace_coexistence(config=None):
 
                 # ── Reference free energies from Calphy ──────────────────
                 phi0_s, phi0_l = _run_calphy_both(config, T_current, out_dir)
+                log.info("phi0_solid=%.6f eV/atom   phi0_liquid=%.6f eV/atom",
+                         phi0_s, phi0_l)
 
                 # ── Integrate and find initial coexistence ───────────────
                 _, mu_s_scan, x_s_scan, phi_s_scan = _phi_from_scan(
@@ -368,23 +375,25 @@ def trace_coexistence(config=None):
                 run_sgcmc_scan(liquid_lmp_cfg, T_current, mu_local,
                                liquid_dir, cores=config["cores"])
 
-                # ── Integrate from predicted phi ─────────────────────
-                # Predict phi using dphi = -S dT
-                # We need the previous results
-                last = results[-1]
-                phi_pred = last["phi_coex"] - last["S_solid"] * dT # Wait, s_solid or s_liquid? they should be equalish at coex
-                # Actually, use (s_solid + s_liquid)/2 for better stability?
-                # No, they are the same at coexistence.
-                
-                # NOTE: Since we changed phi definition, S is already consistent.
+                # ── Compute phi0 for this step ───────────────────────
+                if phi0_method == "calphy":
+                    phi0_s, phi0_l = _run_calphy_both(config, T_current, out_dir)
+                    log.info("phi0 (calphy): phi0_solid=%.6f  phi0_liquid=%.6f eV/atom",
+                             phi0_s, phi0_l)
+                else:  # "propagate"
+                    last = results[-1]
+                    phi0_s = last["phi_coex"] - last["S_solid"] * dT
+                    phi0_l = last["phi_coex"] - last["S_liquid"] * dT
+                    log.info("phi0 (propagated): phi0_solid=%.6f  phi0_liquid=%.6f eV/atom",
+                             phi0_s, phi0_l)
                 
                 df_s_local = compute_sgcmc_averages(solid_dir,  mu_local, n_atoms, n_last)
                 df_l_local = compute_sgcmc_averages(liquid_dir, mu_local, n_atoms, n_last)
                 
                 mu_s, x_s_fine, phi_s = compute_semi_grand_fe(
-                    df_s_local, phi_pred, n_grid=n_grid, mu_ref=delta_mu_new)
+                    df_s_local, phi0_s, n_grid=n_grid, mu_ref=delta_mu_new)
                 mu_l, x_l_fine, phi_l = compute_semi_grand_fe(
-                    df_l_local, phi_pred, n_grid=n_grid, mu_ref=delta_mu_new)
+                    df_l_local, phi0_l, n_grid=n_grid, mu_ref=delta_mu_new)
 
                 # ── Find refined coexistence ──────────────────────────
                 mu_coex, x_s_coex, x_l_coex, phi_coex = find_coexistence(
@@ -416,13 +425,16 @@ def trace_coexistence(config=None):
                     log.error("Clausius-Clapeyron failed: %s — stopping.", exc)
                     break
             elif pred_method == "tau":
-                T_start = config["T_start"]
-                tau_old = T_start / T_current
-                tau_new = T_start / (T_current + dT)
+                T_start_val = config["T_start"]
+                tau_old = T_start_val / T_current
+                tau_new = T_start_val / (T_current + dT)
                 d_tau = tau_new - tau_old
                 try:
-                    d_mu = tau_based_prediction(
+                    d_mu_half = tau_based_prediction(
                         U_solid, x_s_coex, U_liquid, x_l_coex, d_tau)
+                    d_mu = 2.0 * d_mu_half  # tau formula gives d(Δμ/2); double it
+                    log.info("tau prediction: d(Δμ/2)=%.6f → d(Δμ)=%.6f eV",
+                             d_mu_half, d_mu)
                 except ZeroDivisionError as exc:
                     log.error("Tau-based prediction failed: %s — stopping.", exc)
                     break

@@ -63,6 +63,7 @@ config = {
 
     # Coexistence prediction & Refinement
     "prediction_method": "clausius-clapeyron", # "clausius-clapeyron" or "tau"
+    "phi0_method":       "propagate",          # "propagate" (S-based) or "calphy" (every step)
     "n_local_points":    5,      # total points in local refinement scan
     "local_spacing":     0.02,   # spacing between refinement points in eV
 
