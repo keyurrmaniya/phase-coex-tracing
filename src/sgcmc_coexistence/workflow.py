@@ -26,11 +26,11 @@ Step 0  (T_start only):
     • Compute entropy at coexistence; apply prediction → delta_mu_new
 
 Steps 1, 2, … (T+dT, T+2dT, …):
-    • SGCMC local scan around predicted delta_mu_new
     • phi0 method (config option):
-      - "propagate": phi_pred = phi_old - S_old * dT  (no calphy)
-      - "calphy":    run calphy at every T step for fresh phi0
-    • Integrate (2x-1) locally from phi0 to find refined crossing delta_mu_coex
+      - "propagate": local scan only; phi_pred = phi_old - S_old * dT
+      - "calphy":    anchor (Δμ=0) + bridge + local scan; calphy for fresh phi0
+    • SGCMC scan over the chosen grid
+    • Integrate (2x-1) from anchor/prediction to find crossing delta_mu_coex
     • Prediction → next delta_mu_new
 """
 
@@ -110,9 +110,10 @@ DEFAULT_CONFIG = {
 
     # ── Coexistence prediction & Refinement ─────────────────────────────
     "prediction_method":    "clausius-clapeyron",  # "clausius-clapeyron" or "tau"
-    "phi0_method":          "propagate",           # "propagate" (S-based) or "calphy" (every step)
+    "phi0_method":          "propagate",           # "propagate" (S-based) or "calphy" (anchor+bridge)
     "n_local_points":       5,      # total points in local scan (centered at pred)
     "local_spacing":        0.02,   # spacing between points in eV
+    "n_bridge_points":      0,      # intermediate pts between anchor & local (calphy mode)
 
     # ── Output ───────────────────────────────────────────────────────────
     "output_dir": "coexistence_output",
@@ -359,49 +360,72 @@ def trace_coexistence(config=None):
                 U_solid  = _U_at_mu(solid_dir,  chem_pots, mu_coex, n_atoms, n_last)
                 U_liquid = _U_at_mu(liquid_dir, chem_pots, mu_coex, n_atoms, n_last)
             else:
-                # ── Local refinement scan ────────────────────────────
+                # ── Build scan grid ───────────────────────────────────
                 n_local = config.get("n_local_points", 5)
                 spacing = config.get("local_spacing", 0.02)
-                
-                # Center-aligned local grid
                 n_half = n_local // 2
                 mu_local = delta_mu_new + np.arange(-n_half, n_half + 1) * spacing
-                
-                log.info("SGCMC local scan — solid  @ T=%.0f K, range=[%.4f, %.4f] (%d pts)",
-                         T_current, mu_local[0], mu_local[-1], n_local)
-                run_sgcmc_scan(solid_lmp_cfg,  T_current, mu_local,
+
+                if phi0_method == "calphy":
+                    # Anchor (chem_pot_start) + optional bridge + local
+                    anchor = config["chem_pot_start"]
+                    n_bridge = config.get("n_bridge_points", 0)
+                    if n_bridge > 0:
+                        bridge = np.linspace(anchor, mu_local[0],
+                                             n_bridge + 2)[1:-1]
+                    else:
+                        bridge = np.array([])
+                    mu_scan = np.sort(np.unique(
+                        np.concatenate([[anchor], bridge, mu_local])))
+                    mu_ref_val = None   # integrate from anchor (first pt)
+                    log.info(
+                        "SGCMC grid (calphy): anchor=%.4f + %d bridge + %d local "
+                        "= %d total pts, range [%.4f, %.4f]",
+                        anchor, n_bridge, len(mu_local), len(mu_scan),
+                        mu_scan[0], mu_scan[-1])
+                else:
+                    mu_scan = mu_local
+                    mu_ref_val = delta_mu_new
+                    log.info(
+                        "SGCMC grid (propagate): %d local pts, "
+                        "range [%.4f, %.4f]",
+                        len(mu_scan), mu_scan[0], mu_scan[-1])
+
+                # ── Run SGCMC ─────────────────────────────────────────
+                log.info("SGCMC scan — solid  @ T=%.0f K", T_current)
+                run_sgcmc_scan(solid_lmp_cfg,  T_current, mu_scan,
                                solid_dir,  cores=config["cores"])
-                log.info("SGCMC local scan — liquid @ T=%.0f K", T_current)
-                run_sgcmc_scan(liquid_lmp_cfg, T_current, mu_local,
+                log.info("SGCMC scan — liquid @ T=%.0f K", T_current)
+                run_sgcmc_scan(liquid_lmp_cfg, T_current, mu_scan,
                                liquid_dir, cores=config["cores"])
 
-                # ── Compute phi0 for this step ───────────────────────
+                # ── Compute phi0 ──────────────────────────────────────
                 if phi0_method == "calphy":
                     phi0_s, phi0_l = _run_calphy_both(config, T_current, out_dir)
                     log.info("phi0 (calphy): phi0_solid=%.6f  phi0_liquid=%.6f eV/atom",
                              phi0_s, phi0_l)
-                else:  # "propagate"
+                else:
                     last = results[-1]
                     phi0_s = last["phi_coex"] - last["S_solid"] * dT
                     phi0_l = last["phi_coex"] - last["S_liquid"] * dT
                     log.info("phi0 (propagated): phi0_solid=%.6f  phi0_liquid=%.6f eV/atom",
                              phi0_s, phi0_l)
-                
-                df_s_local = compute_sgcmc_averages(solid_dir,  mu_local, n_atoms, n_last)
-                df_l_local = compute_sgcmc_averages(liquid_dir, mu_local, n_atoms, n_last)
-                
-                mu_s, x_s_fine, phi_s = compute_semi_grand_fe(
-                    df_s_local, phi0_s, n_grid=n_grid, mu_ref=delta_mu_new)
-                mu_l, x_l_fine, phi_l = compute_semi_grand_fe(
-                    df_l_local, phi0_l, n_grid=n_grid, mu_ref=delta_mu_new)
 
-                # ── Find refined coexistence ──────────────────────────
+                # ── Integrate and find coexistence ────────────────────
+                df_s_scan = compute_sgcmc_averages(solid_dir,  mu_scan, n_atoms, n_last)
+                df_l_scan = compute_sgcmc_averages(liquid_dir, mu_scan, n_atoms, n_last)
+
+                mu_s, x_s_fine, phi_s = compute_semi_grand_fe(
+                    df_s_scan, phi0_s, n_grid=n_grid, mu_ref=mu_ref_val)
+                mu_l, x_l_fine, phi_l = compute_semi_grand_fe(
+                    df_l_scan, phi0_l, n_grid=n_grid, mu_ref=mu_ref_val)
+
                 mu_coex, x_s_coex, x_l_coex, phi_coex = find_coexistence(
                     mu_s, x_s_fine, phi_s,
                     mu_l, x_l_fine, phi_l)
 
-                U_solid  = _U_at_mu(solid_dir,  mu_local, mu_coex, n_atoms, n_last)
-                U_liquid = _U_at_mu(liquid_dir, mu_local, mu_coex, n_atoms, n_last)
+                U_solid  = _U_at_mu(solid_dir,  mu_scan, mu_coex, n_atoms, n_last)
+                U_liquid = _U_at_mu(liquid_dir, mu_scan, mu_coex, n_atoms, n_last)
 
             log.info("Coexistence: δμ=%.4f eV  x_solid=%.4f  x_liquid=%.4f",
                      mu_coex, x_s_coex, x_l_coex)

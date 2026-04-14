@@ -63,9 +63,10 @@ config = {
 
     # Coexistence prediction & Refinement
     "prediction_method": "clausius-clapeyron", # "clausius-clapeyron" or "tau"
-    "phi0_method":       "propagate",          # "propagate" (S-based) or "calphy" (every step)
+    "phi0_method":       "propagate",          # "propagate" (S-based) or "calphy" (anchor+bridge)
     "n_local_points":    5,      # total points in local refinement scan
     "local_spacing":     0.02,   # spacing between refinement points in eV
+    "n_bridge_points":   0,      # intermediate pts between anchor & local (calphy mode only)
 
     # Calphy
     "calphy_exec":   "calphy",
