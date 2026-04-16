@@ -450,15 +450,23 @@ def trace_coexistence(config=None):
                     break
             elif pred_method == "tau":
                 T_start_val = config["T_start"]
-                tau_old = T_start_val / T_current
-                tau_new = T_start_val / (T_current + dT)
-                d_tau = tau_new - tau_old
+                tau_current = T_start_val / T_current
+                tau_new     = T_start_val / (T_current + dT)
+                d_tau       = tau_new - tau_current
                 try:
-                    d_mu_half = tau_based_prediction(
+                    # Step in scaled space: Δμ̃ = τ * Δμ
+                    d_mu_tilde = tau_based_prediction(
                         U_solid, x_s_coex, U_liquid, x_l_coex, d_tau)
-                    d_mu = 2.0 * d_mu_half  # tau formula gives d(Δμ/2); double it
-                    log.info("tau prediction: d(Δμ/2)=%.6f → d(Δμ)=%.6f eV",
-                             d_mu_half, d_mu)
+                    mu_tilde_coex = tau_current * mu_coex
+                    mu_tilde_new  = mu_tilde_coex + d_mu_tilde
+                    delta_mu_new  = mu_tilde_new / tau_new   # convert back
+                    d_mu = delta_mu_new - mu_coex
+                    log.info(
+                        "tau prediction: τ_cur=%.6f  τ_new=%.6f  δτ=%.6f",
+                        tau_current, tau_new, d_tau)
+                    log.info(
+                        "  Δμ̃_coex=%.6f  δΔμ̃=%.6f  Δμ̃_new=%.6f  → Δμ_new=%.6f eV",
+                        mu_tilde_coex, d_mu_tilde, mu_tilde_new, delta_mu_new)
                 except ZeroDivisionError as exc:
                     log.error("Tau-based prediction failed: %s — stopping.", exc)
                     break
@@ -466,7 +474,9 @@ def trace_coexistence(config=None):
                 log.error("Unknown prediction_method: %s", pred_method)
                 break
 
-            delta_mu_new = mu_coex + d_mu
+            if pred_method != "tau":
+                # CC already set d_mu; compute delta_mu_new
+                delta_mu_new = mu_coex + d_mu
             log.info("d_δμ=%.4f eV  →  δμ_new=%.4f eV @ T=%.1f K",
                      d_mu, delta_mu_new, T_current + dT)
 

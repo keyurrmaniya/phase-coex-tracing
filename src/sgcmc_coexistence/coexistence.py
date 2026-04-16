@@ -159,29 +159,38 @@ def clausius_clapeyron_step(S_solid, x_solid, S_liquid, x_liquid, dT):
 
 
 def tau_based_prediction(U_solid, x_solid, U_liquid, x_liquid, d_tau):
-    """Compute d_delta_mu using the tau-based prediction equation.
+    """Compute δΔμ̃ (the change in the *scaled* chemical potential) using
+    the tau-based coexistence tracking equation.
 
-    Formula::
+    From IntegrationofG.pdf, Eq. 34 (binary system, P=0)::
 
-        d_delta_mu = ((U_solid - U_liquid) * d_tau) / (2 * (x_solid - x_liquid))
+        δΔμ̃₁ = ((u_α - u_β) / (2 * (c₁_α - c₁_β))) * δτ
+
+    where Δμ̃ = τ * Δμ  is the **scaled** chemical potential, and
+    τ = T_ref / T.
+
+    The caller must convert back to the original Δμ::
+
+        Δμ̃_new = τ_current * Δμ_coex + δΔμ̃
+        Δμ_new  = Δμ̃_new / τ_new
 
     Parameters
     ----------
     U_solid : float
         Potential energy per atom of solid (eV/atom).
     x_solid : float
-        Ag mole fraction of solid.
+        Ag mole fraction of solid phase (c₁).
     U_liquid : float
         Potential energy per atom of liquid (eV/atom).
     x_liquid : float
-        Ag mole fraction of liquid.
+        Ag mole fraction of liquid phase (c₁).
     d_tau : float
-        Change in tau (Ti/T_new - Ti/T_old).
+        Change in tau: δτ = T_ref/T_new - T_ref/T_current.
 
     Returns
     -------
     float
-        Change in delta_mu (eV).
+        δΔμ̃  — change in the *scaled* chemical potential (eV).
     """
     delta_x = x_solid - x_liquid
     if abs(delta_x) < 1e-12:
@@ -189,3 +198,4 @@ def tau_based_prediction(U_solid, x_solid, U_liquid, x_liquid, d_tau):
             "x_solid ≈ x_liquid; tau-based prediction is ill-defined."
         )
     return ((U_solid - U_liquid) * d_tau) / (2 * delta_x)
+
