@@ -415,20 +415,29 @@ def trace_coexistence(config=None):
                 df_s_scan = compute_sgcmc_averages(solid_dir,  mu_scan, n_atoms, n_last)
                 df_l_scan = compute_sgcmc_averages(liquid_dir, mu_scan, n_atoms, n_last)
 
-                mu_s, x_s_fine, phi_s = compute_semi_grand_fe(
-                    df_s_scan, phi0_s, n_grid=n_grid, mu_ref=mu_ref_val)
-                mu_l, x_l_fine, phi_l = compute_semi_grand_fe(
-                    df_l_scan, phi0_l, n_grid=n_grid, mu_ref=mu_ref_val)
+                if len(mu_scan) > 1:
+                    mu_s, x_s_fine, phi_s = compute_semi_grand_fe(
+                        df_s_scan, phi0_s, n_grid=n_grid, mu_ref=mu_ref_val)
+                    mu_l, x_l_fine, phi_l = compute_semi_grand_fe(
+                        df_l_scan, phi0_l, n_grid=n_grid, mu_ref=mu_ref_val)
 
-                mu_coex, x_s_coex, x_l_coex, phi_coex = find_coexistence(
-                    mu_s, x_s_fine, phi_s,
-                    mu_l, x_l_fine, phi_l)
+                    mu_coex, x_s_coex, x_l_coex, phi_coex = find_coexistence(
+                        mu_s, x_s_fine, phi_s,
+                        mu_l, x_l_fine, phi_l)
+                else:
+                    # Single-point refinement (Trust Prediction mode)
+                    mu_coex = mu_scan[0]
+                    x_s_coex = df_s_scan["x_mean"].iloc[0]
+                    x_l_coex = df_l_scan["x_mean"].iloc[0]
+                    # Use the average of predicted potentials as the common phi
+                    phi_coex = 0.5 * (phi0_s + phi0_l)
+                    log.info("Single-point refinement: trust prediction Δμ=%.4f", mu_coex)
 
                 U_solid  = _U_at_mu(solid_dir,  mu_scan, mu_coex, n_atoms, n_last)
                 U_liquid = _U_at_mu(liquid_dir, mu_scan, mu_coex, n_atoms, n_last)
 
-            log.info("Coexistence: δμ=%.4f eV  x_solid=%.4f  x_liquid=%.4f",
-                     mu_coex, x_s_coex, x_l_coex)
+            log.info("Coexistence found: δμ=%.4f eV  x_solid=%.4f  x_liquid=%.4f  φ=%.6f",
+                     mu_coex, x_s_coex, x_l_coex, phi_coex)
 
             # ── Entropy ──────────────────────────────────────────────
             S_solid  = compute_entropy(

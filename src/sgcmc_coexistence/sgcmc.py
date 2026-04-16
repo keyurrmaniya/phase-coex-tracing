@@ -110,6 +110,10 @@ def compute_semi_grand_fe(df_sgcmc, phi0, n_grid=1000, mu_ref=None):
     if mu_ref is None:
         mu_ref = mu_raw[0]
 
+    if len(mu_raw) == 1:
+        # Single point case: return the point as-is
+        return np.array([mu_raw[0]]), np.array([x_raw[0]]), np.array([phi0])
+
     # ── Step 1: interpolate x onto fine grid ─────────────────────────
     # Ensure the grid includes mu_ref
     mu_min = min(mu_raw[0], mu_ref)
