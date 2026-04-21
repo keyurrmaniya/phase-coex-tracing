@@ -440,10 +440,29 @@ def trace_coexistence(config=None):
                      mu_coex, x_s_coex, x_l_coex, phi_coex)
 
             # ── Entropy ──────────────────────────────────────────────
-            S_solid  = compute_entropy(
-                U_solid,  mu_coex, x_s_coex, phi_coex, T_current)
-            S_liquid = compute_entropy(
-                U_liquid, mu_coex, x_l_coex, phi_coex, T_current)
+            if phi0_method == "calphy":
+                # Run Calphy at the current T to get fresh F_pure for
+                # each phase, then compute phase-specific phi at
+                # coexistence using the single-point approximation:
+                #   φ_phase = F_pure - (2x_coex - 1) * Δμ_coex / 2
+                if step_idx != 0:
+                    phi0_s, phi0_l = _run_calphy_both(
+                        config, T_current, out_dir)
+                # phi0_s, phi0_l are already available from step 0 or
+                # from the calphy call in the grid-building block above.
+                phi_s_at_coex = phi0_s - (2 * x_s_coex - 1) * mu_coex / 2.0
+                phi_l_at_coex = phi0_l - (2 * x_l_coex - 1) * mu_coex / 2.0
+                log.info("phi (calphy single-pt): phi_solid=%.6f  phi_liquid=%.6f eV/atom",
+                         phi_s_at_coex, phi_l_at_coex)
+                S_solid  = compute_entropy(
+                    U_solid,  mu_coex, x_s_coex, phi_s_at_coex, T_current)
+                S_liquid = compute_entropy(
+                    U_liquid, mu_coex, x_l_coex, phi_l_at_coex, T_current)
+            else:
+                S_solid  = compute_entropy(
+                    U_solid,  mu_coex, x_s_coex, phi_coex, T_current)
+                S_liquid = compute_entropy(
+                    U_liquid, mu_coex, x_l_coex, phi_coex, T_current)
             log.info("S_solid=%.6f  S_liquid=%.6f  eV/(atom·K)",
                      S_solid, S_liquid)
 
@@ -463,19 +482,25 @@ def trace_coexistence(config=None):
                 tau_new     = T_start_val / (T_current + dT)
                 d_tau       = tau_new - tau_current
                 try:
-                    # Step in scaled space: Δμ̃ = τ * Δμ
-                    d_mu_tilde = tau_based_prediction(
+                    # The formula in coexistence.tau_based_prediction (Eq 34) 
+                    # returns δΔμ̃_pdf = δ(τ * Δμ_ours / 2).
+                    d_mu_tilde_half = tau_based_prediction(
                         U_solid, x_s_coex, U_liquid, x_l_coex, d_tau)
-                    mu_tilde_coex = tau_current * mu_coex
-                    mu_tilde_new  = mu_tilde_coex + d_mu_tilde
-                    delta_mu_new  = mu_tilde_new / tau_new   # convert back
+                    
+                    # Work with the half-value scaled potential directly
+                    mu_tilde_half_coex = tau_current * mu_coex / 2.0
+                    mu_tilde_half_new  = mu_tilde_half_coex + d_mu_tilde_half
+                    
+                    # Convert back: Δμ_ours = 2 * (Δμ̃_pdf / τ)
+                    delta_mu_new  = 2.0 * (mu_tilde_half_new / tau_new)
+                    
                     d_mu = delta_mu_new - mu_coex
                     log.info(
                         "tau prediction: τ_cur=%.6f  τ_new=%.6f  δτ=%.6f",
                         tau_current, tau_new, d_tau)
                     log.info(
-                        "  Δμ̃_coex=%.6f  δΔμ̃=%.6f  Δμ̃_new=%.6f  → Δμ_new=%.6f eV",
-                        mu_tilde_coex, d_mu_tilde, mu_tilde_new, delta_mu_new)
+                        "  Δμ̃_half_coex=%.6f  δΔμ̃_half=%.6f  Δμ̃_half_new=%.6f  → Δμ_new=%.6f eV",
+                        mu_tilde_half_coex, d_mu_tilde_half, mu_tilde_half_new, delta_mu_new)
                 except ZeroDivisionError as exc:
                     log.error("Tau-based prediction failed: %s — stopping.", exc)
                     break
